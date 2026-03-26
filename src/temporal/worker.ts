@@ -11,7 +11,7 @@ async function ensureNamespace(name: string, address: string) {
     logger.info({ name, address }, 'Checking/Registering Temporal namespace...');
     await service.registerNamespace({
       namespace: name,
-      workflowExecutionRetentionPeriod: { seconds: String(60 * 60 * 24 * 7) }, // 7 days
+      workflowExecutionRetentionPeriod: { seconds: (60 * 60 * 24 * 7) as any }, // 7 days
     });
     logger.info({ name }, 'Namespace registered successfully');
   } catch (error: any) {

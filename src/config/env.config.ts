@@ -17,7 +17,7 @@ export const ENV = {
         LEVEL: process.env.LOG_LEVEL || 'info',
     },
     AI_GATEWAY_URL: process.env.AI_GATEWAY_URL || 'http://localhost:4000',
-    AI_GATEWAY_KEY: process.env.LITELLM_API_KEY || process.env.AI_GATEWAY_KEY || 'sk-1234',
+    AI_GATEWAY_KEY: process.env.LITELLM_API_KEY || process.env.AI_GATEWAY_KEY || '',
     NEO4J: {
         URL: process.env.NEO4J_URL || 'bolt://localhost:7687',
         USER: process.env.NEO4J_USER || 'neo4j',

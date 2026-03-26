@@ -197,12 +197,59 @@ ${text}
             const result = await session.run(
                 `MATCH (n:${neo4jLabel})
                  WHERE n.name CONTAINS $query OR n.description CONTAINS $query
-                 MATCH path = (n)-[*1..${depth}]-(m:${neo4jLabel})
+                 MATCH path = (n)-[*0..${depth}]-(m:${neo4jLabel})
                  RETURN path LIMIT 50`,
                 { query, depth }
             );
 
-            return result.records.map(record => record.get('path'));
+            const nodes = new Map();
+            const relations = new Set();
+
+            result.records.forEach(record => {
+                const path = record.get('path');
+                
+                // Add start and end nodes of the path
+                const start = path.start;
+                const end = path.end;
+                
+                if (start) {
+                    nodes.set(start.properties.name, {
+                        id: start.properties.name,
+                        ...start.properties
+                    });
+                }
+                
+                if (end) {
+                    nodes.set(end.properties.name, {
+                        id: end.properties.name,
+                        ...end.properties
+                    });
+                }
+
+                // Add intermediate segments
+                path.segments.forEach((seg: any) => {
+                    nodes.set(seg.start.properties.name, {
+                        id: seg.start.properties.name,
+                        ...seg.start.properties
+                    });
+                    nodes.set(seg.end.properties.name, {
+                        id: seg.end.properties.name,
+                        ...seg.end.properties
+                    });
+                    
+                    relations.add(JSON.stringify({
+                        from: seg.start.properties.name,
+                        to: seg.end.properties.name,
+                        type: seg.relationship.type,
+                        description: seg.relationship.properties.description
+                    }));
+                });
+            });
+
+            return {
+                nodes: Array.from(nodes.values()),
+                relations: Array.from(relations).map(r => JSON.parse(r as string))
+            };
         } finally {
             await session.close();
         }
