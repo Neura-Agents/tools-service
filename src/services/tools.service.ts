@@ -354,7 +354,7 @@ export class ToolsService {
 
             return data;
         } catch (error: any) {
-            logger.error({ error, url }, `Failed to execute tool: ${name}`);
+            logger.error({ err: error, url }, `Failed to execute tool: ${name}`);
             throw error;
         }
     }
