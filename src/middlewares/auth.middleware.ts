@@ -1,6 +1,26 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import jwksClient from 'jwks-rsa';
 import logger from '../config/logger';
+import { ENV } from '../config/env.config';
+
+const client = jwksClient({
+    jwksUri: `${ENV.KEYCLOAK?.ISSUER_URL || `http://keycloak:8080/realms/${ENV.KEYCLOAK?.REALM || 'neura-agents'}`}/protocol/openid-connect/certs`,
+    cache: true,
+    rateLimit: true,
+    jwksRequestsPerMinute: 5
+});
+
+function getKey(header: any, callback: any) {
+    client.getSigningKey(header.kid, (err, key: any) => {
+        if (err) {
+            callback(err);
+            return;
+        }
+        const signingKey = key.getPublicKey();
+        callback(null, signingKey);
+    });
+}
 
 export interface AuthenticatedRequest extends Request {
     user?: {
@@ -11,7 +31,7 @@ export interface AuthenticatedRequest extends Request {
     };
 }
 
-export const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+export const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     // First check Authorization header
     let token: string | undefined;
     const authHeader = req.headers.authorization;
@@ -29,7 +49,17 @@ export const authenticate = (req: AuthenticatedRequest, res: Response, next: Nex
 
     if (token) {
         try {
-            const decoded = jwt.decode(token) as any;
+            // SECURE: Actually verify the token signature
+            const decoded = await new Promise<any>((resolve, reject) => {
+                jwt.verify(token, getKey, {
+                    issuer: [ENV.KEYCLOAK?.ISSUER_URL, ENV.KEYCLOAK?.PUBLIC_ISSUER_URL],
+                    algorithms: ['RS256']
+                }, (err, payload) => {
+                    if (err) return reject(err);
+                    resolve(payload);
+                });
+            });
+
             if (decoded && decoded.sub) {
                 req.user = {
                     id: decoded.sub,
@@ -39,8 +69,10 @@ export const authenticate = (req: AuthenticatedRequest, res: Response, next: Nex
                 };
                 return next();
             }
-        } catch (err) {
-            logger.error({ err }, 'Token decode error');
+        } catch (err: any) {
+            logger.error({ err: err.message }, 'Token verification error');
+            res.status(401).json({ error: `Unauthorized: ${err.message}` });
+            return;
         }
     }
 

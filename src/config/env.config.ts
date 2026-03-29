@@ -22,5 +22,10 @@ export const ENV = {
         URL: process.env.NEO4J_URL || 'bolt://localhost:7687',
         USER: process.env.NEO4J_USER || 'neo4j',
         PASSWORD: process.env.NEO4J_PASSWORD || 'neo4jpassword',
+    },
+    KEYCLOAK: {
+        ISSUER_URL: process.env.KEYCLOAK_ISSUER_URL || 'http://keycloak:8080/realms/neura-agents',
+        PUBLIC_ISSUER_URL: process.env.KEYCLOAK_PUBLIC_ISSUER_URL || 'http://localhost:8081/realms/neura-agents',
+        REALM: process.env.VITE_KEYCLOAK_REALM || 'neura-agents'
     }
 };
