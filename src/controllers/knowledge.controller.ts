@@ -8,6 +8,7 @@ import { KnowledgeService } from '../services/knowledge.service';
 import { GraphService } from '../services/graph.service';
 import { getTemporalClient } from '../temporal/client';
 import { WorkflowNotFoundError } from '@temporalio/client';
+import { ENV } from '../config/env.config';
 
 export class KnowledgeController {
     // Helper to format SSE events
@@ -18,6 +19,36 @@ export class KnowledgeController {
 
     private static sendSSEHeartbeat(res: Response) {
         res.write(': heartbeat\n\n');
+    }
+
+    /**
+     * Helper to check user balance before starting resource-heavy operations
+     */
+    private static async checkUserBalance(userId: string): Promise<{ authorized: boolean; balance?: number; error?: string }> {
+      try {
+        const response = await axios.get(`${ENV.BILLING_SERVICE_URL}/backend/api/billing/balance`, {
+          params: { userId },
+          headers: {
+            'x-internal-key': ENV.INTERNAL_SERVICE_SECRET
+          }
+        });
+
+        const balance = response.data.balance || 0;
+        const MINIMUM_BALANCE = 0.01; // Minimum to start
+
+        if (balance < MINIMUM_BALANCE) {
+          return { 
+            authorized: false, 
+            balance, 
+            error: `Insufficient balance: $${balance.toFixed(4)}. Minimum $${MINIMUM_BALANCE} required to start.` 
+          };
+        }
+
+        return { authorized: true, balance };
+      } catch (error: any) {
+        logger.error({ error: error.message }, 'Balance check failed in tools-service');
+        return { authorized: false, error: 'Credit verification service is currently unavailable.' };
+      }
     }
 
     // Knowledge Bases
@@ -241,6 +272,17 @@ export class KnowledgeController {
             const { type } = req.query; // 'base' or 'graph'
             const files = req.files as Express.Multer.File[];
             const authHeader = req.headers.authorization || '';
+            const userId = req.user?.id || 'system';
+
+            // PRE-CHECK: Check user balance
+            const balanceCheck = await KnowledgeController.checkUserBalance(userId);
+            if (!balanceCheck.authorized) {
+                return res.status(402).json({ 
+                    error: 'Insufficient Balance', 
+                    message: balanceCheck.error,
+                    balance: balanceCheck.balance
+                });
+            }
 
             if (!files || files.length === 0) {
                 return res.status(400).json({ error: 'No files uploaded' });
@@ -283,7 +325,7 @@ export class KnowledgeController {
 
             const docIds = uploadResults.map(doc => doc.id);
             let workflowId = '';
-            const userId = req.user?.id || 'system';
+            // userId is already declared above
 
             if (type === 'base') {
                 workflowId = await KnowledgeService.triggerIngestion(id as string, docIds, authHeader as string, userId);
@@ -292,8 +334,8 @@ export class KnowledgeController {
             }
 
             res.json({ success: true, documents: uploadResults, workflowId, status: 'processing' });
-        } catch (error) {
-            logger.error({ error }, 'Failed to upload knowledge documents');
+        } catch (error: any) {
+            logger.error({ error: error.message }, 'Failed to upload knowledge documents');
             res.status(500).json({ error: 'Internal Server Error' });
         }
     }
@@ -320,29 +362,43 @@ export class KnowledgeController {
             const { query, limit = 5 } = req.body;
             if (!query) return res.status(400).json({ error: 'Query is required' });
             
+            // PRE-CHECK: Check user balance
+            const userId = req.user?.id || 'system';
+            const balanceCheck = await KnowledgeController.checkUserBalance(userId);
+            if (!balanceCheck.authorized) {
+                return res.status(402).json({ 
+                    error: 'Insufficient Balance', 
+                    message: balanceCheck.error,
+                    balance: balanceCheck.balance
+                });
+            }
+
             const { results, usage } = await KnowledgeService.searchKnowledgeBase(id as string, query, limit);
             
             // Record usage asynchronously
             if (usage) {
                 const execution_id = `kb-search-${Date.now()}`;
-                const platformServiceUrl = process.env.PLATFORM_SERVICE_URL || 'http://localhost:3004';
-                axios.post(`${platformServiceUrl}/backend/api/platform/usage`, {
+                axios.post(`${ENV.PLATFORM_SERVICE_URL}/backend/api/platform/usage`, {
                     execution_id,
                     resource_id: id,
                     resource_type: 'knowledge-base',
                     action_type: 'search',
-                    user_id: req.user?.id,
+                    user_id: userId,
                     total_input_tokens: usage.prompt_tokens,
                     total_completion_tokens: usage.completion_tokens || 0,
                     total_tokens: usage.total_tokens,
                     total_cost: usage.total_cost,
                     llm_calls: [usage]
+                }, {
+                    headers: {
+                        'x-internal-key': ENV.INTERNAL_SERVICE_SECRET
+                    }
                 }).catch(err => logger.error({ err }, 'Failed to record KB search usage'));
             }
 
             res.json(results);
-        } catch (error) {
-            logger.error({ error }, 'Knowledge base query failed');
+        } catch (error: any) {
+            logger.error({ error: error.message }, 'Knowledge base query failed');
             res.status(500).json({ error: 'Internal Server Error' });
         }
     }
@@ -351,10 +407,22 @@ export class KnowledgeController {
         try {
             const { id } = req.params;
             const { query, depth = 2 } = req.body;
+            const userId = req.user?.id || 'system';
+            
+            // PRE-CHECK: Check user balance
+            const balanceCheck = await KnowledgeController.checkUserBalance(userId);
+            if (!balanceCheck.authorized) {
+                return res.status(402).json({ 
+                    error: 'Insufficient Balance', 
+                    message: balanceCheck.error,
+                    balance: balanceCheck.balance
+                });
+            }
+
             const results = await GraphService.searchGraph(id as string, query, depth);
             res.json(results);
-        } catch (error) {
-            logger.error({ error }, 'Failed to query knowledge graph');
+        } catch (error: any) {
+            logger.error({ error: error.message }, 'Failed to query knowledge graph');
             res.status(500).json({ error: 'Internal Server Error' });
         }
     }

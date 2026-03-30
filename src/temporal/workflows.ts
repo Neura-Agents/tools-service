@@ -15,7 +15,8 @@ const {
   updateKGStatus,
   setKBProcessing,
   setKGProcessing,
-  recordUsage
+  recordUsage,
+  checkBalance
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -46,6 +47,9 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
   try {
     pushEvent('status', { message: 'Starting KB ingestion...', status: 'processing' });
     await setKBProcessing(knowledgeId);
+    
+    // Initial balance check
+    await checkBalance(userId, 0.05);
 
     await Promise.all(
       docIds.map(async (docId) => {
@@ -132,6 +136,9 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
   try {
     pushEvent('status', { message: 'Starting KG ingestion...', status: 'processing' });
     await setKGProcessing(knowledgeId);
+
+    // Initial balance check
+    await checkBalance(userId, 0.05);
 
     for (const docId of docIds) {
       try {
