@@ -283,11 +283,12 @@ export class KnowledgeController {
 
             const docIds = uploadResults.map(doc => doc.id);
             let workflowId = '';
+            const userId = req.user?.id || 'system';
 
             if (type === 'base') {
-                workflowId = await KnowledgeService.triggerIngestion(id as string, docIds, authHeader as string);
+                workflowId = await KnowledgeService.triggerIngestion(id as string, docIds, authHeader as string, userId);
             } else if (type === 'graph') {
-                workflowId = await GraphService.triggerIngestion(id as string, docIds, authHeader as string);
+                workflowId = await GraphService.triggerIngestion(id as string, docIds, authHeader as string, userId);
             }
 
             res.json({ success: true, documents: uploadResults, workflowId, status: 'processing' });
@@ -318,9 +319,30 @@ export class KnowledgeController {
             const { id } = req.params;
             const { query, limit = 5 } = req.body;
             if (!query) return res.status(400).json({ error: 'Query is required' });
-            const results = await KnowledgeService.searchKnowledgeBase(id as string, query, limit);
+            
+            const { results, usage } = await KnowledgeService.searchKnowledgeBase(id as string, query, limit);
+            
+            // Record usage asynchronously
+            if (usage) {
+                const execution_id = `kb-search-${Date.now()}`;
+                const platformServiceUrl = process.env.PLATFORM_SERVICE_URL || 'http://localhost:3004';
+                axios.post(`${platformServiceUrl}/backend/api/platform/usage`, {
+                    execution_id,
+                    resource_id: id,
+                    resource_type: 'knowledge-base',
+                    action_type: 'search',
+                    user_id: req.user?.id,
+                    total_input_tokens: usage.prompt_tokens,
+                    total_completion_tokens: usage.completion_tokens || 0,
+                    total_tokens: usage.total_tokens,
+                    total_cost: usage.total_cost,
+                    llm_calls: [usage]
+                }).catch(err => logger.error({ err }, 'Failed to record KB search usage'));
+            }
+
             res.json(results);
         } catch (error) {
+            logger.error({ error }, 'Knowledge base query failed');
             res.status(500).json({ error: 'Internal Server Error' });
         }
     }

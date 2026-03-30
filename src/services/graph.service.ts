@@ -78,7 +78,7 @@ export class GraphService {
         return chunks.map(c => c.pageContent);
     }
 
-    static async extractGraphData(text: string): Promise<{ nodes: GraphNode[], relations: GraphRelation[] }> {
+    static async extractGraphData(text: string): Promise<{ nodes: GraphNode[], relations: GraphRelation[], usage: any }> {
         const prompt = `
 Extract all entities and their physical or logical relations from the following text.
 Format the output as a JSON object with exactly two arrays: 'nodes' and 'relations'.
@@ -110,10 +110,17 @@ ${text}
 
             let content = response.data.choices[0].message.content;
             content = content.replace(/```json\n?/, '').replace(/```\n?/, '').trim();
-            return JSON.parse(content);
+            const graphData = JSON.parse(content);
+            
+            const usage = response.data.usage || { total_tokens: 0 };
+            const costHeader = response.headers['x-litellm-response-cost'] || response.headers['x-litellm-cost'];
+            usage.total_cost = usage.total_cost || (costHeader ? parseFloat(costHeader) : 0);
+            usage.model = this.extractionModel;
+
+            return { ...graphData, usage };
         } catch (error: any) {
             logger.error({ error: error.message, model: this.extractionModel }, 'Failed to extract graph data');
-            return { nodes: [], relations: [] };
+            return { nodes: [], relations: [], usage: { total_tokens: 0, total_cost: 0 } };
         }
     }
 
@@ -277,13 +284,13 @@ ${text}
         }
     }
 
-    static async triggerIngestion(knowledgeId: string, docIds: string[], authHeader: string): Promise<string> {
+    static async triggerIngestion(knowledgeId: string, docIds: string[], authHeader: string, userId: string): Promise<string> {
         try {
             const client = await getTemporalClient('knowledge-graph');
             const workflowId = `kg-ingestion-${knowledgeId}-${uuidv4()}`;
             logger.info({ knowledgeId, workflowId }, 'Starting KG ingestion workflow via Temporal');
             await client.workflow.start('KGIngestionWorkflow', {
-                args: [knowledgeId, docIds, authHeader],
+                args: [knowledgeId, docIds, authHeader, userId],
                 taskQueue: 'kg-ingestion-queue',
                 workflowId,
             });

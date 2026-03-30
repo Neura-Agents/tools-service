@@ -2,6 +2,8 @@ import { KnowledgeService } from '../services/knowledge.service';
 import { GraphService } from '../services/graph.service';
 import { pool } from '../config/db.config';
 import logger from '../config/logger';
+import axios from 'axios';
+import { ENV } from '../config/env.config';
 
 // --- SHARED ACTIVITIES ---
 
@@ -18,14 +20,29 @@ export async function updateDocumentStatus(docId: string, status: string, error?
     await KnowledgeService.updateDocumentStatus(docId, status, error);
 }
 
+/**
+ * Common activity to record usage in the platform-service.
+ */
+export async function recordUsage(usage: any): Promise<void> {
+    try {
+        const platformServiceUrl = ENV.PLATFORM_SERVICE_URL || 'http://localhost:3004';
+        await axios.post(`${platformServiceUrl}/backend/api/platform/usage`, usage);
+    } catch (error: any) {
+        logger.error({ 
+            error: error.message, 
+            details: error.response?.data 
+        }, 'Failed to record usage in platform-service');
+    }
+}
+
 // --- KNOWLEDGE BASE ACTIVITIES ---
 
 export async function chunkKBText(text: string): Promise<string[]> {
     return await KnowledgeService.chunkText(text);
 }
 
-export async function generateAndStoreEmbedding(knowledgeId: string, docId: string, content: string): Promise<void> {
-    await KnowledgeService.generateAndStoreEmbedding(knowledgeId, docId, content);
+export async function generateAndStoreEmbedding(knowledgeId: string, docId: string, content: string): Promise<any> {
+    return await KnowledgeService.generateAndStoreEmbedding(knowledgeId, docId, content);
 }
 
 export async function updateKBStatus(knowledgeId: string, docIds: string[]): Promise<void> {
@@ -51,10 +68,11 @@ export async function chunkKGText(text: string): Promise<string[]> {
     return await GraphService.chunkText(text);
 }
 
-export async function extractAndSaveGraphChunk(knowledgeId: string, docId: string, text: string, chunkIndex: number, totalChunks: number): Promise<void> {
-    const { nodes, relations } = await GraphService.extractGraphData(text);
+export async function extractAndSaveGraphChunk(knowledgeId: string, docId: string, text: string, chunkIndex: number, totalChunks: number): Promise<any> {
+    const { nodes, relations, usage } = await GraphService.extractGraphData(text);
     await GraphService.saveGraphChunk(knowledgeId, docId, nodes, relations);
     await GraphService.updateDocumentProgress(docId, chunkIndex, totalChunks);
+    return usage;
 }
 
 export async function finalizeKG(knowledgeId: string, docId: string): Promise<void> {

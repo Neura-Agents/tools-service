@@ -1,4 +1,4 @@
-import { proxyActivities, defineQuery, setHandler } from '@temporalio/workflow';
+import { proxyActivities, defineQuery, setHandler, uuid4 } from '@temporalio/workflow';
 import type * as activities from './activities';
 
 const { 
@@ -14,7 +14,8 @@ const {
   finalizeKG,
   updateKGStatus,
   setKBProcessing,
-  setKGProcessing
+  setKGProcessing,
+  recordUsage
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10 minutes',
   retry: {
@@ -29,9 +30,11 @@ const {
 export const getEventsQuery = defineQuery<any[]>('getEvents');
 export const isCompletedQuery = defineQuery<boolean>('isCompleted');
 
-export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[], authHeader: string): Promise<void> {
+export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[], authHeader: string, userId: string): Promise<void> {
   const events: any[] = [];
   let isCompleted = false;
+  let totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, total_cost: 0 };
+  const llmCalls: any[] = [];
 
   setHandler(getEventsQuery, () => events);
   setHandler(isCompletedQuery, () => isCompleted);
@@ -59,18 +62,25 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
           pushEvent('doc_progress', { docId, status: 'Chunked text', totalChunks: chunks.length });
           
           let chunksProcessed = 0;
-          await Promise.all(
-            chunks.map(async (chunk) => {
-              await generateAndStoreEmbedding(knowledgeId, docId, chunk);
-              chunksProcessed++;
-              pushEvent('doc_progress', { 
-                docId, 
-                status: 'Embedding chunks', 
-                processedChunks: chunksProcessed, 
-                totalChunks: chunks.length 
-              });
-            })
-          );
+          for (const chunk of chunks) {
+            const usage = await generateAndStoreEmbedding(knowledgeId, docId, chunk);
+            chunksProcessed++;
+            
+            if (usage) {
+              totalUsage.prompt_tokens += usage.prompt_tokens || 0;
+              totalUsage.completion_tokens += usage.completion_tokens || 0;
+              totalUsage.total_tokens += usage.total_tokens || 0;
+              totalUsage.total_cost += usage.total_cost || 0;
+              llmCalls.push(usage);
+            }
+
+            pushEvent('doc_progress', { 
+              docId, 
+              status: 'Embedding chunks', 
+              processedChunks: chunksProcessed, 
+              totalChunks: chunks.length 
+            });
+          }
           
           await updateDocumentStatus(docId, 'completed');
           pushEvent('doc_completed', { docId });
@@ -83,6 +93,22 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
       })
     );
 
+    // Record total usage for the ingestion
+    if (totalUsage.total_tokens > 0) {
+      await recordUsage({
+        execution_id: `kb-ingest-${uuid4()}`,
+        resource_id: knowledgeId,
+        resource_type: 'knowledge-base',
+        action_type: 'ingestion',
+        user_id: userId,
+        total_input_tokens: totalUsage.prompt_tokens,
+        total_completion_tokens: totalUsage.completion_tokens,
+        total_tokens: totalUsage.total_tokens,
+        total_cost: totalUsage.total_cost,
+        llm_calls: llmCalls
+      });
+    }
+
     await updateKBStatus(knowledgeId, docIds);
     pushEvent('status', { message: 'KB ingestion completed', status: 'active' });
   } finally {
@@ -90,9 +116,11 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
   }
 }
 
-export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[], authHeader: string): Promise<void> {
+export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[], authHeader: string, userId: string): Promise<void> {
   const events: any[] = [];
   let isCompleted = false;
+  let totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, total_cost: 0 };
+  const llmCalls: any[] = [];
 
   setHandler(getEventsQuery, () => events);
   setHandler(isCompletedQuery, () => isCompleted);
@@ -121,7 +149,16 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
         let index = 0;
         for (const chunk of chunks) {
           index++;
-          await extractAndSaveGraphChunk(knowledgeId, docId, chunk, index, chunks.length);
+          const usage = await extractAndSaveGraphChunk(knowledgeId, docId, chunk, index, chunks.length);
+          
+          if (usage) {
+            totalUsage.prompt_tokens += usage.prompt_tokens || 0;
+            totalUsage.completion_tokens += usage.completion_tokens || 0;
+            totalUsage.total_tokens += usage.total_tokens || 0;
+            totalUsage.total_cost += usage.total_cost || 0;
+            llmCalls.push(usage);
+          }
+
           pushEvent('doc_progress', { 
             docId, 
             status: 'Extracting graph data', 
@@ -137,6 +174,22 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
         await updateDocumentStatus(docId, 'failed', errorMessage);
         pushEvent('doc_failed', { docId, error: errorMessage });
       }
+    }
+
+    // Record total usage for the ingestion
+    if (totalUsage.total_tokens > 0) {
+      await recordUsage({
+        execution_id: `kg-ingest-${uuid4()}`,
+        resource_id: knowledgeId,
+        resource_type: 'knowledge-graph',
+        action_type: 'ingestion',
+        user_id: userId,
+        total_input_tokens: totalUsage.prompt_tokens,
+        total_completion_tokens: totalUsage.completion_tokens,
+        total_tokens: totalUsage.total_tokens,
+        total_cost: totalUsage.total_cost,
+        llm_calls: llmCalls
+      });
     }
 
     await updateKGStatus(knowledgeId);

@@ -73,12 +73,13 @@ export class KnowledgeService {
         return chunks.map(c => c.pageContent);
     }
 
-    static async generateAndStoreEmbedding(knowledgeId: string, docId: string, content: string): Promise<void> {
-        const embedding = await this.generateEmbedding(content);
+    static async generateAndStoreEmbedding(knowledgeId: string, docId: string, content: string): Promise<any> {
+        const { embedding, usage } = await this.generateEmbedding(content);
         await pool.query(
             'INSERT INTO knowledge_embeddings (knowledge_id, document_id, content, embedding) VALUES ($1, $2, $3, $4)',
             [knowledgeId, docId, content, `[${embedding.join(',')}]`]
         );
+        return usage;
     }
 
     static async logFailedIngestion(docId: string, errorMessage: string): Promise<void> {
@@ -89,7 +90,7 @@ export class KnowledgeService {
         );
     }
 
-    static async generateEmbedding(text: string, inputType: 'passage' | 'query' = 'passage'): Promise<number[]> {
+    static async generateEmbedding(text: string, inputType: 'passage' | 'query' = 'passage'): Promise<{ embedding: number[], usage: any }> {
         try {
             const response = await axios.post(
                 `${this.litellmUrl}/embeddings`,
@@ -107,7 +108,16 @@ export class KnowledgeService {
             );
 
             const embedding = response.data.data[0].embedding;
-            return embedding;
+            const usage = response.data.usage || { prompt_tokens: 0, total_tokens: 0 };
+            
+            // LiteLLM might provide cost in headers or usage
+            const costHeader = response.headers['x-litellm-response-cost'] || response.headers['x-litellm-cost'];
+            usage.total_cost = usage.total_cost || (costHeader ? parseFloat(costHeader) : 0);
+            
+            // Add model info for usage tracking
+            usage.model = this.embeddingModel;
+
+            return { embedding, usage };
         } catch (error: any) {
             logger.error({ 
                 error: error.message, 
@@ -118,7 +128,7 @@ export class KnowledgeService {
         }
     }
 
-    static async triggerIngestion(knowledgeId: string, docIds: string[], authHeader: string): Promise<string> {
+    static async triggerIngestion(knowledgeId: string, docIds: string[], authHeader: string, userId: string): Promise<string> {
         try {
             const client = await getTemporalClient('knowledge-base');
             const workflowId = `kb-ingestion-${knowledgeId}-${uuidv4()}`;
@@ -126,7 +136,7 @@ export class KnowledgeService {
             logger.info({ knowledgeId, workflowId }, 'Starting KB ingestion workflow via Temporal');
 
             await client.workflow.start('KBIngestionWorkflow', {
-                args: [knowledgeId, docIds, authHeader],
+                args: [knowledgeId, docIds, authHeader, userId],
                 taskQueue: 'kb-ingestion-queue',
                 workflowId,
             });
@@ -139,9 +149,9 @@ export class KnowledgeService {
         }
     }
 
-    static async searchKnowledgeBase(knowledgeId: string, query: string, limit: number = 5): Promise<any[]> {
+    static async searchKnowledgeBase(knowledgeId: string, query: string, limit: number = 5): Promise<{ results: any[], usage: any }> {
         try {
-            const queryEmbedding = await this.generateEmbedding(query, 'query');
+            const { embedding: queryEmbedding, usage } = await this.generateEmbedding(query, 'query');
             const result = await pool.query(
                 `SELECT content, 1 - (embedding <=> $1) as similarity 
                  FROM knowledge_embeddings 
@@ -150,7 +160,7 @@ export class KnowledgeService {
                  LIMIT $3`,
                 [`[${queryEmbedding.join(',')}]`, knowledgeId, limit]
             );
-            return result.rows;
+            return { results: result.rows, usage };
         } catch (error) {
             logger.error({ knowledgeId, query, error }, 'Knowledge base search failed');
             throw error;
