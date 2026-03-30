@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import { ENV } from './config/env.config';
 import { initDb } from './config/db.config';
 import { initNeo4j } from './config/neo4j.config';
@@ -12,7 +11,6 @@ import knowledgeRoutes from './routes/knowledge.routes';
 const app = express();
 
 // Middleware
-app.use(cors());
 app.use(express.json());
 
 // Log requests
