@@ -20,7 +20,7 @@ export async function updateDocumentStatus(docId: string, status: string, error?
     await KnowledgeService.updateDocumentStatus(docId, status, error);
 }
 
-export async function checkBalance(userId: string, minAmount: number = 0.01): Promise<void> {
+export async function checkBalance(userId: string, currentSpent: number = 0, minAmount: number = 0.01): Promise<void> {
     try {
         const billingServiceUrl = ENV.BILLING_SERVICE_URL || 'http://billing-service:3007';
         const response = await axios.get(`${billingServiceUrl}/backend/api/billing/balance`, {
@@ -30,17 +30,20 @@ export async function checkBalance(userId: string, minAmount: number = 0.01): Pr
             }
         });
         
-        const balance = parseFloat(response.data.balance || '0');
-        if (balance < minAmount) {
-            throw new Error(`Insufficient balance: $${balance}. Minimum $${minAmount} required.`);
+        const total_balance = parseFloat(response.data.balance || '0');
+        const effective_balance = total_balance - currentSpent;
+
+        if (effective_balance < minAmount) {
+            throw new Error(`Insufficient balance: $${total_balance.toFixed(4)}. Current session cost: $${currentSpent.toFixed(4)}. Effective balance: $${effective_balance.toFixed(4)}. Minimum $${minAmount} required to continue.`);
         }
     } catch (error: any) {
         if (error.message.includes('Insufficient balance')) throw error;
-        logger.error({ error: error.message }, 'Failed to check balance');
-        // Be permissive if billing service is down, or strict?
+        logger.error({ error: error.message }, 'Failed to check balance in tools-service');
+        
         if (error.response?.status === 402) {
             throw new Error('Insufficient credits.');
         }
+        // If billing is down, we allow the workflow to continue to avoid blocking ingestion
     }
 }
 
