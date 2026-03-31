@@ -35,8 +35,7 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
   const events: any[] = [];
   let isCompleted = false;
   let totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, total_cost: 0 };
-  const llmCalls: any[] = [];
-  let usageRecorded = false;
+  const executionId = `kb-ingest-${uuid4()}`;
 
   setHandler(getEventsQuery, () => events);
   setHandler(isCompletedQuery, () => isCompleted);
@@ -45,24 +44,23 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
     events.push({ type, data, timestamp: Date.now() });
   };
 
-  const recordFinalUsage = async (finalStatus: string) => {
-    if (usageRecorded || totalUsage.total_tokens === 0) return;
-    usageRecorded = true;
+  const recordIncrementalUsage = async (status: string, incrementalUsage?: any) => {
     try {
       await recordUsage({
-        execution_id: `kb-ingest-${uuid4()}`,
+        execution_id: executionId,
         resource_id: knowledgeId,
         resource_type: 'knowledge-base',
         action_type: 'ingestion',
         user_id: userId,
-        total_input_tokens: totalUsage.prompt_tokens,
-        total_completion_tokens: totalUsage.completion_tokens,
-        total_tokens: totalUsage.total_tokens,
-        total_cost: totalUsage.total_cost,
-        llm_calls: llmCalls
+        total_input_tokens: incrementalUsage?.prompt_tokens || 0,
+        total_completion_tokens: incrementalUsage?.completion_tokens || 0,
+        total_tokens: incrementalUsage?.total_tokens || 0,
+        total_cost: incrementalUsage?.total_cost || 0,
+        llm_calls: incrementalUsage ? [incrementalUsage] : []
       });
-    } catch (e) {
-      console.error('Failed to record terminal usage for KB ingestion:', e);
+    } catch (e: any) {
+      if (e.type === 'InsufficientCreditsError') throw e;
+      console.error('Failed to record incremental usage for KB ingestion:', e);
     }
   };
 
@@ -89,8 +87,8 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
           
           let chunksProcessed = 0;
           for (const chunk of chunks) {
-            // Check balance before each embedding (including running cost)
-            await checkBalance(userId, totalUsage.total_cost, 0.001);
+            // Check balance (credits already deducted from DB on previous chunks)
+            await checkBalance(userId, 0, 0.001);
 
             const usage = await generateAndStoreEmbedding(knowledgeId, docId, chunk);
             chunksProcessed++;
@@ -100,7 +98,9 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
               totalUsage.completion_tokens += usage.completion_tokens || 0;
               totalUsage.total_tokens += usage.total_tokens || 0;
               totalUsage.total_cost += usage.total_cost || 0;
-              llmCalls.push(usage);
+              
+              // INCREMENTAL RECORDING
+              await recordIncrementalUsage('RUNNING', usage);
             }
 
             pushEvent('doc_progress', { 
@@ -119,19 +119,19 @@ export async function KBIngestionWorkflow(knowledgeId: string, docIds: string[],
           await logFailedKBIngestion(docId, errorMessage);
           pushEvent('doc_failed', { docId, error: errorMessage });
           
-          // If it's a balance error, we stop the whole workflow by re-throwing
           if (errorMessage.includes('Insufficient balance')) throw error;
         }
       })
     );
 
-    await recordFinalUsage('completed');
+    // Final status update (no extra tokens)
+    await recordIncrementalUsage('SUCCESS');
     await updateKBStatus(knowledgeId, docIds);
     pushEvent('status', { message: 'KB ingestion completed', status: 'active' });
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     pushEvent('status', { message: `KB ingestion failed: ${errorMessage}`, status: 'failed' });
-    await recordFinalUsage('failed');
+    await recordIncrementalUsage('FAILED');
     throw error;
   } finally {
     isCompleted = true;
@@ -143,7 +143,7 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
   let isCompleted = false;
   let totalUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, total_cost: 0 };
   const llmCalls: any[] = [];
-  let usageRecorded = false;
+  const executionId = `kg-ingest-${uuid4()}`;
 
   setHandler(getEventsQuery, () => events);
   setHandler(isCompletedQuery, () => isCompleted);
@@ -152,24 +152,23 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
     events.push({ type, data, timestamp: Date.now() });
   };
 
-  const recordFinalUsage = async (finalStatus: string) => {
-    if (usageRecorded || totalUsage.total_tokens === 0) return;
-    usageRecorded = true;
+  const recordIncrementalUsage = async (status: string, incrementalUsage?: any) => {
     try {
       await recordUsage({
-        execution_id: `kg-ingest-${uuid4()}`,
+        execution_id: executionId,
         resource_id: knowledgeId,
         resource_type: 'knowledge-graph',
         action_type: 'ingestion',
         user_id: userId,
-        total_input_tokens: totalUsage.prompt_tokens,
-        total_completion_tokens: totalUsage.completion_tokens,
-        total_tokens: totalUsage.total_tokens,
-        total_cost: totalUsage.total_cost,
-        llm_calls: llmCalls
+        total_input_tokens: incrementalUsage?.prompt_tokens || 0,
+        total_completion_tokens: incrementalUsage?.completion_tokens || 0,
+        total_tokens: incrementalUsage?.total_tokens || 0,
+        total_cost: incrementalUsage?.total_cost || 0,
+        llm_calls: incrementalUsage ? [incrementalUsage] : []
       });
-    } catch (e) {
-      console.error('Failed to record terminal usage for KG ingestion:', e);
+    } catch (e: any) {
+      if (e.type === 'InsufficientCreditsError') throw e;
+      console.error('Failed to record incremental usage for KG ingestion:', e);
     }
   };
 
@@ -195,8 +194,8 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
         
         let index = 0;
         for (const chunk of chunks) {
-          // Check balance before extraction (including running cost)
-          await checkBalance(userId, totalUsage.total_cost, 0.001);
+          // Check balance (credits already deducted from DB on previous chunks)
+          await checkBalance(userId, 0, 0.001);
 
           index++;
           const usage = await extractAndSaveGraphChunk(knowledgeId, docId, chunk, index, chunks.length);
@@ -206,7 +205,9 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
             totalUsage.completion_tokens += usage.completion_tokens || 0;
             totalUsage.total_tokens += usage.total_tokens || 0;
             totalUsage.total_cost += usage.total_cost || 0;
-            llmCalls.push(usage);
+            
+            // INCREMENTAL RECORDING
+            await recordIncrementalUsage('RUNNING', usage);
           }
 
           pushEvent('doc_progress', { 
@@ -224,18 +225,18 @@ export async function KGIngestionWorkflow(knowledgeId: string, docIds: string[],
         await updateDocumentStatus(docId, 'failed', errorMessage);
         pushEvent('doc_failed', { docId, error: errorMessage });
         
-        // Bail out entirely if it's a credit failure
         if (errorMessage.includes('Insufficient balance')) throw error;
       }
     }
 
-    await recordFinalUsage('completed');
+    // Final status update (no extra tokens)
+    await recordIncrementalUsage('SUCCESS');
     await updateKGStatus(knowledgeId);
     pushEvent('status', { message: 'KG ingestion completed', status: 'active' });
   } catch (error: any) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     pushEvent('status', { message: `KG ingestion failed: ${errorMessage}`, status: 'failed' });
-    await recordFinalUsage('failed');
+    await recordIncrementalUsage('FAILED');
     throw error;
   } finally {
     isCompleted = true;
