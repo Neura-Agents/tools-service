@@ -17,8 +17,8 @@ export const ENV = {
         LEVEL: process.env.LOG_LEVEL || 'info',
     },
     INTERNAL_SERVICE_SECRET: process.env.INTERNAL_SERVICE_SECRET || 'super-secret-key',
-    AI_GATEWAY_URL: process.env.AI_GATEWAY_URL || 'http://localhost:4000',
-    AI_GATEWAY_KEY: process.env.LITELLM_API_KEY || process.env.AI_GATEWAY_KEY || '',
+    LITELLM_URL: process.env.LITELLM_URL || 'http://localhost:4000',
+    LITELLM_MASTER_KEY: process.env.LITELLM_API_KEY || process.env.LITELLM_MASTER_KEY || '',
     PLATFORM_SERVICE_URL: process.env.PLATFORM_SERVICE_URL || 'http://localhost:3006',
     BILLING_SERVICE_URL: process.env.BILLING_SERVICE_URL || 'http://billing-service:3007',
     NEO4J: {

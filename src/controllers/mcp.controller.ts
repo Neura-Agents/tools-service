@@ -18,7 +18,7 @@ export const getMcpServers = async (req: AuthenticatedRequest, res: Response) =>
 
         let whereClause = 'WHERE (user_id = $1 OR visibility = \'public\')';
         const params: any[] = [userId];
-        
+
         if (query) {
             params.push(`%${query}%`);
             whereClause += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`;
@@ -52,16 +52,16 @@ export const syncMcpTools = async (req: AuthenticatedRequest, res: Response) => 
         await client.query('BEGIN');
 
         // 1. Sync Servers
-        const serversUrl = `${ENV.AI_GATEWAY_URL}/v1/mcp/server`;
+        const serversUrl = `${ENV.LITELLM_URL}/v1/mcp/server`;
         logger.info(`Syncing MCP servers from ${serversUrl}`);
-        
+
         const serversResponse = await axios.get(serversUrl, {
             headers: {
-                'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`,
+                'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
-        
+
         const servers = serversResponse.data?.mcp_servers || serversResponse.data || [];
         for (const server of servers) {
             const sId = server.server_id;
@@ -102,7 +102,7 @@ export const getMcpTools = async (req: AuthenticatedRequest, res: Response) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
         const { server_id } = req.query;
-        
+
         // Fix: Use a join to ensure tools are only returned for servers the user has access to
         let queryStr = `
             SELECT t.*, t.input_schema as "inputSchema" 
@@ -118,7 +118,7 @@ export const getMcpTools = async (req: AuthenticatedRequest, res: Response) => {
         }
 
         queryStr += ' ORDER BY t.name ASC';
-        
+
         const { rows } = await pool.query(queryStr, params);
         res.json({ tools: rows });
     } catch (err: any) {
@@ -130,28 +130,28 @@ export const getMcpTools = async (req: AuthenticatedRequest, res: Response) => {
 export const callMcpTool = async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { name, arguments: args, server_id, serverName } = req.body;
-        const url = `${ENV.AI_GATEWAY_URL}/mcp-rest/tools/call`;
+        const url = `${ENV.LITELLM_URL}/mcp-rest/tools/call`;
 
         logger.info({ tool: name, server: server_id || serverName }, `Calling MCP tool via ${url}`);
-        
+
         const response = await axios.post(url, {
             name,
             arguments: args,
             server_id: server_id || serverName
         }, {
             headers: {
-                'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`,
+                'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
 
         res.json(response.data);
     } catch (err: any) {
-        logger.error({ 
+        logger.error({
             err: err.response?.data || err.message,
             status: err.response?.status
         }, 'Error calling MCP tool via AI Gateway');
-        
+
         res.status(err.response?.status || 500).json({
             error: true,
             message: 'Failed to call MCP tool',
@@ -163,7 +163,7 @@ export const callMcpTool = async (req: AuthenticatedRequest, res: Response) => {
 export const testMcpTools = async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { server_id, server_name, url, transport, auth_type } = req.body;
-        const testUrl = `${ENV.AI_GATEWAY_URL}/mcp-rest/test/tools/list`;
+        const testUrl = `${ENV.LITELLM_URL}/mcp-rest/test/tools/list`;
 
         logger.info({ url: testUrl }, 'Testing MCP tools list');
 
@@ -175,7 +175,7 @@ export const testMcpTools = async (req: AuthenticatedRequest, res: Response) => 
             auth_type: auth_type || "none"
         }, {
             headers: {
-                'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`,
+                'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -199,7 +199,7 @@ export const createMcpServer = async (req: AuthenticatedRequest, res: Response) 
     try {
         const userId = req.user?.id || 'system';
         const { transport, url, auth_type, mcp_info, allowed_tools, visibility = 'public', alias } = req.body;
-        const createUrl = `${ENV.AI_GATEWAY_URL}/v1/mcp/server`;
+        const createUrl = `${ENV.LITELLM_URL}/v1/mcp/server`;
 
         logger.info({ url: createUrl, userId, visibility }, 'Creating MCP server in AI Gateway and local DB');
 
@@ -215,7 +215,7 @@ export const createMcpServer = async (req: AuthenticatedRequest, res: Response) 
             allowed_tools: allowed_tools || []
         }, {
             headers: {
-                'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`,
+                'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -240,15 +240,15 @@ export const createMcpServer = async (req: AuthenticatedRequest, res: Response) 
                 visibility = EXCLUDED.visibility,
                 updated_at = CURRENT_TIMESTAMP`,
             [
-                serverId, 
+                serverId,
                 mcp_info?.server_name || url,
                 alias || '',
-                mcp_info?.description || '', 
-                'active', 
-                transport.toLowerCase(), 
-                url, 
+                mcp_info?.description || '',
+                'active',
+                transport.toLowerCase(),
+                url,
                 auth_type || 'none',
-                userId, 
+                userId,
                 visibility
             ]
         );
@@ -279,14 +279,14 @@ export const updateMcpServer = async (req: AuthenticatedRequest, res: Response) 
     try {
         const userId = req.user?.id || 'system';
         const { visibility, ...rest } = req.body;
-        const updateUrl = `${ENV.AI_GATEWAY_URL}/v1/mcp/server`;
+        const updateUrl = `${ENV.LITELLM_URL}/v1/mcp/server`;
 
         logger.info({ url: updateUrl, userId }, 'Updating MCP server in AI Gateway and local DB');
 
         // Call AI Gateway
         const response = await axios.put(updateUrl, rest, {
             headers: {
-                'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`,
+                'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -305,12 +305,12 @@ export const updateMcpServer = async (req: AuthenticatedRequest, res: Response) 
                  updated_at = CURRENT_TIMESTAMP
              WHERE server_id = $6 AND user_id = $7`,
             [
-                mcpInfo?.server_name || rest.server_name, 
+                mcpInfo?.server_name || rest.server_name,
                 rest.alias || '',
-                mcpInfo?.description || rest.description, 
-                visibility || 'public', 
+                mcpInfo?.description || rest.description,
+                visibility || 'public',
                 rest.auth_type || 'none',
-                serverId, 
+                serverId,
                 userId
             ]
         );
@@ -345,7 +345,7 @@ export const deleteMcpServer = async (req: AuthenticatedRequest, res: Response) 
     try {
         const userId = req.user?.id || 'system';
         const { id } = req.params;
-        const deleteUrl = `${ENV.AI_GATEWAY_URL}/v1/mcp/server/${id}`;
+        const deleteUrl = `${ENV.LITELLM_URL}/v1/mcp/server/${id}`;
 
         logger.info({ url: deleteUrl, userId }, 'Deleting MCP server in AI Gateway and local DB');
 
@@ -353,7 +353,7 @@ export const deleteMcpServer = async (req: AuthenticatedRequest, res: Response) 
         try {
             await axios.delete(deleteUrl, {
                 headers: {
-                    'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`
+                    'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`
                 }
             });
         } catch (gatewayErr: any) {
@@ -396,19 +396,19 @@ export const deleteMcpServer = async (req: AuthenticatedRequest, res: Response) 
 async function syncToolsForServer(serverId: string, dbClientOrPool: any) {
     logger.info(`Fetching tools for server from AI Gateway: ${serverId}`);
     try {
-        const toolsUrl = `${ENV.AI_GATEWAY_URL}/mcp-rest/tools/list?server_id=${serverId}`;
+        const toolsUrl = `${ENV.LITELLM_URL}/mcp-rest/tools/list?server_id=${serverId}`;
         const toolsResponse = await axios.get(toolsUrl, {
             headers: {
-                'Authorization': `Bearer ${ENV.AI_GATEWAY_KEY}`,
+                'Authorization': `Bearer ${ENV.LITELLM_MASTER_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
-        
+
         const tools = toolsResponse.data?.tools || [];
         for (const tool of tools) {
             const schema = tool.input_schema || tool.inputSchema || {};
             const desc = tool.description || '';
-            
+
             await dbClientOrPool.query(
                 `INSERT INTO mcp_tools (server_id, name, description, input_schema)
                  VALUES ($1, $2, $3, $4)

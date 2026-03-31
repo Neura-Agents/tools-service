@@ -25,12 +25,12 @@ interface GraphRelation {
 
 export class GraphService {
     private static splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 2000, 
+        chunkSize: 2000,
         chunkOverlap: 200,
     });
 
-    private static litellmUrl = ENV.AI_GATEWAY_URL;
-    private static litellmKey = ENV.AI_GATEWAY_KEY;
+    private static litellmUrl = ENV.LITELLM_URL;
+    private static litellmKey = ENV.LITELLM_MASTER_KEY;
     private static extractionModel = 'gpt-oss-120b';
 
     static async getDocument(docId: string): Promise<any> {
@@ -111,7 +111,7 @@ ${text}
             let content = response.data.choices[0].message.content;
             content = content.replace(/```json\n?/, '').replace(/```\n?/, '').trim();
             const graphData = JSON.parse(content);
-            
+
             const usage = response.data.usage || { total_tokens: 0 };
             const costHeader = response.headers['x-litellm-response-cost'] || response.headers['x-litellm-cost'];
             usage.total_cost = usage.total_cost || (costHeader ? parseFloat(costHeader) : 0);
@@ -188,7 +188,7 @@ ${text}
     static async updateGraphStats(knowledgeId: string): Promise<void> {
         const nodeCount = await pool.query('SELECT COUNT(*) FROM knowledge_graph_nodes WHERE knowledge_id = $1', [knowledgeId]);
         const relCount = await pool.query('SELECT COUNT(*) FROM knowledge_graph_relations WHERE knowledge_id = $1', [knowledgeId]);
-        
+
         await pool.query(
             'UPDATE knowledge_graphs SET node_count = $1, relation_count = $2 WHERE id = $3',
             [parseInt(nodeCount.rows[0].count), parseInt(relCount.rows[0].count), knowledgeId]
@@ -214,18 +214,18 @@ ${text}
 
             result.records.forEach(record => {
                 const path = record.get('path');
-                
+
                 // Add start and end nodes of the path
                 const start = path.start;
                 const end = path.end;
-                
+
                 if (start) {
                     nodes.set(start.properties.name, {
                         id: start.properties.name,
                         ...start.properties
                     });
                 }
-                
+
                 if (end) {
                     nodes.set(end.properties.name, {
                         id: end.properties.name,
@@ -243,7 +243,7 @@ ${text}
                         id: seg.end.properties.name,
                         ...seg.end.properties
                     });
-                    
+
                     relations.add(JSON.stringify({
                         from: seg.start.properties.name,
                         to: seg.end.properties.name,
@@ -273,7 +273,7 @@ ${text}
                  DETACH DELETE n`,
                 { documentId }
             );
-            
+
             await session.run(
                 `MATCH (:${neo4jLabel})-[r {document_id: $documentId}]->(:${neo4jLabel})
                  DELETE r`,

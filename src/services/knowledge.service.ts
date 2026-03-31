@@ -12,8 +12,8 @@ export class KnowledgeService {
         chunkOverlap: 200,
     });
 
-    private static litellmUrl = process.env.AI_GATEWAY_URL || 'http://localhost:4000';
-    private static litellmKey = process.env.AI_GATEWAY_KEY || 'sk-1234';
+    private static litellmUrl = process.env.LITELLM_URL || 'http://localhost:4000';
+    private static litellmKey = process.env.LITELLM_MASTER_KEY || 'sk-1234';
     private static embeddingModel = process.env.EMBEDDING_MODEL || 'llama-nemotron-embed-1b-v2';
 
     private static storageServiceUrl = process.env.STORAGE_SERVICE_URL || 'http://localhost:3003';
@@ -109,19 +109,19 @@ export class KnowledgeService {
 
             const embedding = response.data.data[0].embedding;
             const usage = response.data.usage || { prompt_tokens: 0, total_tokens: 0 };
-            
+
             // LiteLLM might provide cost in headers or usage
             const costHeader = response.headers['x-litellm-response-cost'] || response.headers['x-litellm-cost'];
             usage.total_cost = usage.total_cost || (costHeader ? parseFloat(costHeader) : 0);
-            
+
             // Add model info for usage tracking
             usage.model = this.embeddingModel;
 
             return { embedding, usage };
         } catch (error: any) {
-            logger.error({ 
-                error: error.message, 
-                errorData: error.response?.data, 
+            logger.error({
+                error: error.message,
+                errorData: error.response?.data,
                 model: this.embeddingModel
             }, 'LiteLLM embedding call failed');
             throw error;
