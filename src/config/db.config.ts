@@ -7,6 +7,7 @@ export const pool = new Pool({
     user: ENV.DB.USER,
     password: ENV.DB.PASSWORD,
     database: ENV.DB.NAME,
+    options: `-c search_path=${ENV.DB.SCHEMA},public`,
 });
 
 export const initDb = async () => {
@@ -16,7 +17,7 @@ export const initDb = async () => {
             CREATE EXTENSION IF NOT EXISTS vector;
 
             CREATE TABLE IF NOT EXISTS tools (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
                 method VARCHAR(10) NOT NULL,
@@ -32,7 +33,7 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS tool_parameters (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 tool_id UUID REFERENCES tools(id) ON DELETE CASCADE,
                 name VARCHAR(255) NOT NULL,
                 location VARCHAR(50) NOT NULL, -- query, path, header, body
@@ -49,7 +50,7 @@ export const initDb = async () => {
             CREATE INDEX IF NOT EXISTS idx_tools_user_name ON tools(user_id, name);
 
             CREATE TABLE IF NOT EXISTS knowledge_bases (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id VARCHAR(255) NOT NULL,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
@@ -60,7 +61,7 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_graphs (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id VARCHAR(255) NOT NULL,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
@@ -73,7 +74,7 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_documents (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 knowledge_id UUID NOT NULL,
                 knowledge_type VARCHAR(20) NOT NULL,
                 storage_id UUID NOT NULL,
@@ -89,7 +90,7 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_embeddings (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 knowledge_id UUID NOT NULL,
                 document_id UUID REFERENCES knowledge_documents(id) ON DELETE CASCADE,
                 content TEXT NOT NULL,
@@ -98,7 +99,7 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_graph_nodes (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 knowledge_id UUID NOT NULL,
                 document_id UUID REFERENCES knowledge_documents(id) ON DELETE CASCADE,
                 name VARCHAR(255) NOT NULL,
@@ -109,7 +110,7 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_graph_relations (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 knowledge_id UUID NOT NULL,
                 document_id UUID REFERENCES knowledge_documents(id) ON DELETE CASCADE,
                 from_node_id UUID REFERENCES knowledge_graph_nodes(id) ON DELETE CASCADE,
@@ -120,12 +121,39 @@ export const initDb = async () => {
             );
 
             CREATE TABLE IF NOT EXISTS uningested_pipeline (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 knowledge_id UUID NOT NULL,
                 document_id UUID NOT NULL,
                 file_name VARCHAR(255) NOT NULL,
                 error_message TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_tools (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                server_id VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                input_schema JSONB DEFAULT '{}',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (server_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_servers (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                server_id VARCHAR(255) UNIQUE NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                alias VARCHAR(255),
+                description TEXT,
+                status VARCHAR(50) DEFAULT 'active',
+                transport VARCHAR(20) DEFAULT 'http',
+                url TEXT,
+                auth_type VARCHAR(50) DEFAULT 'none',
+                user_id VARCHAR(255) DEFAULT 'system',
+                visibility VARCHAR(20) DEFAULT 'public',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
 
             -- Alter table if column doesn't exist for existing DBs
@@ -192,36 +220,9 @@ export const initDb = async () => {
             FROM storage_metadata sm
             WHERE kd.storage_id = sm.id AND kd.file_url IS NULL;
 
-            CREATE TABLE IF NOT EXISTS mcp_tools (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                server_id VARCHAR(255) NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                description TEXT,
-                input_schema JSONB DEFAULT '{}',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (server_id, name)
-            );
-
             CREATE INDEX IF NOT EXISTS idx_kb_user_id ON knowledge_bases(user_id);
             CREATE INDEX IF NOT EXISTS idx_kg_user_id ON knowledge_graphs(user_id);
             CREATE INDEX IF NOT EXISTS idx_kd_knowledge_id ON knowledge_documents(knowledge_id);
-            CREATE TABLE IF NOT EXISTS mcp_servers (
-                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-                server_id VARCHAR(255) UNIQUE NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                alias VARCHAR(255),
-                description TEXT,
-                status VARCHAR(50) DEFAULT 'active',
-                transport VARCHAR(20) DEFAULT 'http',
-                url TEXT,
-                auth_type VARCHAR(50) DEFAULT 'none',
-                user_id VARCHAR(255) DEFAULT 'system',
-                visibility VARCHAR(20) DEFAULT 'public',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );
-
             CREATE INDEX IF NOT EXISTS idx_mcp_servers_status ON mcp_servers(status);
             CREATE INDEX IF NOT EXISTS idx_mcp_tools_server_id ON mcp_tools(server_id);
         `);

@@ -5,7 +5,7 @@ import logger from '../config/logger';
 import { ENV } from '../config/env.config';
 
 const client = jwksClient({
-    jwksUri: `${ENV.KEYCLOAK?.ISSUER_URL || `http://keycloak:8080/realms/${ENV.KEYCLOAK?.REALM || 'neura-agents'}`}/protocol/openid-connect/certs`,
+    jwksUri: `${ENV.KEYCLOAK?.ISSUER_URL || `http://keycloak:8080/realms/${ENV.KEYCLOAK?.REALM || 'agentic-ai'}`}/protocol/openid-connect/certs`,
     cache: true,
     rateLimit: true,
     jwksRequestsPerMinute: 5
