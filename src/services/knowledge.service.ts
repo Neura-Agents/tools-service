@@ -13,7 +13,7 @@ export class KnowledgeService {
     });
 
     private static litellmUrl = process.env.LITELLM_URL || 'http://localhost:4000';
-    private static litellmKey = process.env.LITELLM_MASTER_KEY || 'sk-1234';
+    private static litellmKey = process.env.LITELLM_API_KEY || 'sk-1234';
     private static embeddingModel = process.env.EMBEDDING_MODEL || 'llama-nemotron-embed-1b-v2';
 
     private static storageServiceUrl = process.env.STORAGE_SERVICE_URL || 'http://localhost:3003';
