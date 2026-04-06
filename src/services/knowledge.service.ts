@@ -97,7 +97,8 @@ export class KnowledgeService {
                 {
                     model: this.embeddingModel,
                     input: text,
-                    input_type: inputType
+                    input_type: inputType,
+                    encoding_format: 'float'
                 },
                 {
                     headers: {
