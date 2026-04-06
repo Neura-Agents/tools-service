@@ -39,14 +39,23 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     res.status(500).json({ error: 'Internal Server Error' });
 });
 
+import { runWorker } from './temporal/worker';
+
 const start = async () => {
     try {
         await initDb();
         await initNeo4j();
+        
+        // Start Temporal Workers in the background
+        runWorker().catch(err => {
+            logger.error({ err }, 'Background Temporal workers failed to start');
+        });
+
         app.listen(ENV.PORT, () => {
             logger.info(`Tools service listening on port ${ENV.PORT} in ${ENV.NODE_ENV} mode`);
         });
     } catch (err) {
+
         logger.fatal({ err }, 'Failed to start tools service');
         process.exit(1);
     }

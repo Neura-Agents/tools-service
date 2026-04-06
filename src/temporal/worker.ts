@@ -23,7 +23,7 @@ async function ensureNamespace(name: string, address: string) {
   }
 }
 
-async function run() {
+export async function runWorker() {
   const address = process.env.TEMPORAL_ADDRESS || 'localhost:7233';
 
   // 1. Ensure namespaces exist before starting workers
@@ -62,7 +62,3 @@ async function run() {
   ]);
 }
 
-run().catch((err) => {
-  logger.error({ err }, 'Temporal worker orchestration failed');
-  process.exit(1);
-});
