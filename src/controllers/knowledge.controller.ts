@@ -63,7 +63,7 @@ export class KnowledgeController {
                 (SELECT COUNT(*) FROM knowledge_documents WHERE knowledge_id = kb.id) as "documentCount",
                 COUNT(*) OVER() as "totalCount"
                 FROM knowledge_bases kb 
-                WHERE (user_id = $1 OR visibility = 'public')
+                WHERE (user_id = $1 OR (visibility = 'public' AND status != 'processing'))
             `;
             const params: any[] = [userId];
             let paramCount = 1;
@@ -164,7 +164,7 @@ export class KnowledgeController {
                 (SELECT COUNT(*) FROM knowledge_graph_relations WHERE knowledge_id = kg.id) as "relation_count",
                 COUNT(*) OVER() as "totalCount"
                 FROM knowledge_graphs kg 
-                WHERE (user_id = $1 OR visibility = 'public')
+                WHERE (user_id = $1 OR (visibility = 'public' AND status != 'processing'))
             `;
             const params: any[] = [userId];
             let paramCount = 1;
@@ -255,6 +255,27 @@ export class KnowledgeController {
     static async getKnowledgeDocuments(req: AuthenticatedRequest, res: Response) {
         try {
             const { id } = req.params; // knowledge_id
+            const userId = req.user?.id;
+
+            // Check if user has access to this KB/KG
+            const kbCheck = await pool.query(
+                `SELECT user_id, visibility, status FROM knowledge_bases WHERE id = $1
+                 UNION
+                 SELECT user_id, visibility, status FROM knowledge_graphs WHERE id = $1`,
+                [id]
+            );
+
+            if (kbCheck.rows.length === 0) {
+                return res.status(404).json({ error: 'Knowledge resource not found' });
+            }
+
+            const resource = kbCheck.rows[0];
+            if (resource.user_id !== userId) {
+                if (resource.visibility !== 'public' || resource.status === 'processing') {
+                    return res.status(403).json({ error: 'Access denied or resource is not yet ready' });
+                }
+            }
+
             const result = await pool.query(
                 'SELECT * FROM knowledge_documents WHERE knowledge_id = $1 ORDER BY uploaded_at DESC',
                 [id]
@@ -272,7 +293,31 @@ export class KnowledgeController {
             const { type } = req.query; // 'base' or 'graph'
             const files = req.files as Express.Multer.File[];
             const authHeader = req.headers.authorization || '';
-            const userId = req.user?.id || 'system';
+            const userId = req.user?.id;
+
+            if (!userId) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            // Check ownership
+            const table = type === 'base' ? 'knowledge_bases' : 'knowledge_graphs';
+            const ownershipCheck = await pool.query(
+                `SELECT user_id, status FROM ${table} WHERE id = $1`,
+                [id]
+            );
+
+            if (ownershipCheck.rows.length === 0) {
+                return res.status(404).json({ error: 'Knowledge resource not found' });
+            }
+
+            const resource = ownershipCheck.rows[0];
+            if (resource.user_id !== userId) {
+                return res.status(403).json({ error: 'Only the owner can upload documents' });
+            }
+
+            if (resource.status === 'processing') {
+                return res.status(400).json({ error: 'Knowledge resource is already being processed. Please wait until it completes.' });
+            }
 
             // PRE-CHECK: Check user balance
             const balanceCheck = await KnowledgeController.checkUserBalance(userId);
@@ -329,8 +374,10 @@ export class KnowledgeController {
 
             if (type === 'base') {
                 workflowId = await KnowledgeService.triggerIngestion(id as string, docIds, authHeader as string, userId);
+                await pool.query('UPDATE knowledge_bases SET status = $1, workflow_id = $2 WHERE id = $3', ['processing', workflowId, id]);
             } else if (type === 'graph') {
                 workflowId = await GraphService.triggerIngestion(id as string, docIds, authHeader as string, userId);
+                await pool.query('UPDATE knowledge_graphs SET status = $1, workflow_id = $2 WHERE id = $3', ['processing', workflowId, id]);
             }
 
             res.json({ success: true, documents: uploadResults, workflowId, status: 'processing' });
@@ -343,11 +390,42 @@ export class KnowledgeController {
     static async deleteDocument(req: AuthenticatedRequest, res: Response) {
         try {
             const docId = req.params.docId as string;
-            const docResult = await pool.query('SELECT knowledge_id FROM knowledge_documents WHERE id = $1', [docId]);
-            if (docResult.rows.length > 0) {
-                const knowledgeId = docResult.rows[0].knowledge_id;
+            const userId = req.user?.id;
+
+            if (!userId) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            // Get document and its parent KB/KG info to check ownership and status
+            const docResult = await pool.query(
+                `SELECT d.knowledge_id, d.knowledge_type, 
+                 COALESCE(kb.user_id, kg.user_id) as owner_id,
+                 COALESCE(kb.status, kg.status) as parent_status
+                 FROM knowledge_documents d
+                 LEFT JOIN knowledge_bases kb ON d.knowledge_id = kb.id AND d.knowledge_type = 'base'
+                 LEFT JOIN knowledge_graphs kg ON d.knowledge_id = kg.id AND d.knowledge_type = 'graph'
+                 WHERE d.id = $1`,
+                [docId]
+            );
+
+            if (docResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Document not found' });
+            }
+
+            const doc = docResult.rows[0];
+            if (doc.owner_id !== userId) {
+                return res.status(403).json({ error: 'Only the owner can delete documents' });
+            }
+
+            if (doc.parent_status === 'processing') {
+                return res.status(400).json({ error: 'Cannot delete documents while the knowledge resource is being processed.' });
+            }
+
+            const knowledgeId = doc.knowledge_id;
+            if (doc.knowledge_type === 'graph') {
                 await GraphService.deleteGraphData(knowledgeId, docId);
             }
+
             await pool.query('DELETE FROM knowledge_documents WHERE id = $1', [docId]);
             res.status(204).send();
         } catch (error) {
@@ -429,15 +507,17 @@ export class KnowledgeController {
 
     static async subscribeToIngestion(req: AuthenticatedRequest, res: Response) {
         const { workflowId } = req.params;
-        const { namespace = 'knowledge-base' } = req.query; // knowledge-base or knowledge-graph
+        const { type = 'base' } = req.query;
+        const namespace = type === 'graph' ? 'knowledge-graph' : 'knowledge-base';
 
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders ? res.flushHeaders() : null;
 
         try {
-            const client = await getTemporalClient(namespace as string);
+            const client = await getTemporalClient(namespace);
             const handle = client.workflow.getHandle(workflowId as string);
 
             try {
@@ -472,6 +552,14 @@ export class KnowledgeController {
 
                     const isCompleted = await handle.query('isCompleted');
                     if (isCompleted) {
+                        // One last check for events before closing
+                        const finalEvents = await handle.query('getEvents');
+                        if (finalEvents && (finalEvents as any[]).length > currentEventCount) {
+                            for (let i = currentEventCount; i < (finalEvents as any[]).length; i++) {
+                                const event = (finalEvents as any[])[i];
+                                KnowledgeController.sendSSEEvent(res, event.type, event.data);
+                            }
+                        }
                         clearInterval(pollInterval);
                         res.end();
                     }

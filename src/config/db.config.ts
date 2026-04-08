@@ -210,6 +210,14 @@ export const initDb = async () => {
                     ALTER TABLE mcp_servers ADD COLUMN auth_type VARCHAR(50) DEFAULT 'none';
                 END IF;
 
+                -- Add workflow_id to knowledge_bases and knowledge_graphs
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='knowledge_bases' AND column_name='workflow_id') THEN
+                    ALTER TABLE knowledge_bases ADD COLUMN workflow_id VARCHAR(255);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='knowledge_graphs' AND column_name='workflow_id') THEN
+                    ALTER TABLE knowledge_graphs ADD COLUMN workflow_id VARCHAR(255);
+                END IF;
+
                 -- Ensure correct vector dimension
                 IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='knowledge_embeddings' AND column_name='embedding') THEN
                     ALTER TABLE knowledge_embeddings ALTER COLUMN embedding TYPE vector(2048);
